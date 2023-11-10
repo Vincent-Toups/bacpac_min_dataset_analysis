@@ -8,39 +8,6 @@ ex_data <- do.call(rbind,
                        filter(domain=="EX" & archive==F) %>%
                        pull(file))) %>% select(-STUDYID,-DOMAIN);
 
-ex_wide_no_time <- pivot_wider(ex_data,
-                               id_cols="USUBJID",
-                               names_from="EXTRT",
-                               values_from="EXCAT",
-                               values_fn=function(...) 1,
-                               values_fill=0) %>%
-    inner_join(read_csv("derived_data/subject-changes.csv"),by="USUBJID") %>%
-    filter(`Visit Count` >= 9) %>%
-    mutate(improved=1.0*(Change>0.0));
-
-train_ii <- runif(nrow(ex_wide_no_time)) < 0.8;
-train <- ex_wide_no_time %>% filter(train_ii);
-test <- ex_wide_no_time %>% filter(!train_ii);
-
-f <-  improved ~ factor(`Exercise`)                                +
-                        factor(`Mindfulness or meditation or relaxation`) +
-                        factor(`NSAIDs`)                                  +
-                        factor(`Opioids`)                                 +
-                        factor(`Diet or weight loss program`)             +
-                        factor(`Non-spinal fusion`)                       +
-                        factor(`Therapy or counseling`)                   +
-                        factor(`SSRI_SNRI`)                               +
-                        factor(`Acupuncture`)                             +
-                        factor(`Spinal fusion`)                           +
-                        factor(`Gabapentin or pregabalin`)                +
-                        factor(`Tricyclic antidepressants`);
-
-model <- gbm(f,
-             distribution='bernoulli', data=train, interaction.depth=3);
-
-roc_info <- roc(predict(model, newdata=test, type="response"),test$improved,pts=seq(0,1,length.out=100));
-plot_roc(roc_info);
-
 ex_wide_time <- pivot_wider(ex_data,
                                id_cols=c("USUBJID","EXDY"),
                                names_from="EXTRT",
@@ -145,12 +112,13 @@ ex_wide_time <- pivot_wider(ex_data,
         }
     }) %>% 
     inner_join(read_csv("derived_data/subject-changes.csv"),by="USUBJID") %>%
-    filter(`Visit Count` >= 8) %>%
+    filter(`Visit Count` >= 6) %>%
     mutate(improved=1.0*(Change>5.0));
 
-train_ii <- runif(nrow(ex_wide_time)) < 0.7;
-train <- ex_wide_time %>% filter(train_ii);
-test <- ex_wide_time %>% filter(!train_ii);
+k <- 8;
+
+fold_ii <- ex_wide_time %>% group_by(improved) %>% mutate(fold=(floor(seq(0,0.999,length.out=length(Change))*k))+1) %>% ungroup() %>% pull(fold);a
+
 
 f <-  improved ~ (`Exercise`)                                +
                         (`Mindfulness or meditation or relaxation`) +
@@ -165,9 +133,33 @@ f <-  improved ~ (`Exercise`)                                +
                         (`Gabapentin or pregabalin`)                +
                         (`Tricyclic antidepressants`);
 
-model <- gbm(f,
-             distribution='bernoulli', data=train, interaction.depth=3,n.trees=100);
-roc_info <- roc(predict(model, newdata=test, type="response"),test$improved,pts=seq(0,1,length.out=1000));
-p <- plot_roc(roc_info);
-ggsave("figures/treatment-model-roc.png");
 
+roc_infos <- do.call(rbind, Map(function(i){
+    train_ii <- fold_ii != i#runif(nrow(ex_wide_time)) < 0.75;
+    train <- ex_wide_time %>% filter(train_ii);
+    test <- ex_wide_time %>% filter(!train_ii);
+
+
+    model <- gbm(f,
+                 distribution='bernoulli', data=train, interaction.depth=2,n.trees=100);
+    roc_info <- roc(predict(model, newdata=test, type="response"),test$improved,pts=seq(0,1,length.out=100));
+    roc_info$fold <- i;
+    roc_info$auc <- roc_auc(roc_info);
+    roc_info
+},1:k));
+
+ggplot(roc_infos,aes(`False Positive Rate`,`True Positive Rate`))+geom_line(aes(group=fold));
+
+
+## train_ii <- runif(nrow(aex_wide_time)) < 0.75;
+## train <- ex_wide_time %>% filter(train_ii);
+## test <- ex_wide_time %>% filter(!train_ii);
+
+
+## model <- gbm(f,
+##              distribution='bernoulli', data=train, interaction.depth=2,n.trees=1000);
+## roc_info <- roc(predict(model, newdata=test, type="response"),test$improved,pts=seq(0,1,length.out=1000));
+## p <- plot_roc(roc_info);
+## ggsave("figures/treatment-model-roc.png",plot=p);
+
+## print(p)

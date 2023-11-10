@@ -21,6 +21,9 @@ columns = u.calc_shared_columns(list(meta_data["schema"]));
 ex = pl.concat([(pl.read_csv(file, parse_dates=True).select(columns))
                 for file in meta_data["file"]]);
 
+ex.write_csv("derived_data/ex_combined.csv");
+
+
 study_counts = ex.groupby('STUDYID').count().with_columns(c('count').alias('Row Count')).drop('count');
 subject_counts = (ex
                   .groupby(['STUDYID','USUBJID'])
