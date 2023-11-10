@@ -24,6 +24,8 @@ shift 2
 ;;
 -e|--environment)
 ENVIRONMENT=$2
+shift 2
+;;
 -h|--help)
 usage
 ;;
@@ -59,7 +61,6 @@ case "$ENVIRONMENT" in
         exit 1
         ;;
 esac
-done
 
 #docker build . --build-arg linux_user_pwd="$(cat .password)" -t ashar
 xhost +SI:localuser:$(whoami) 
