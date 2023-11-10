@@ -31,8 +31,16 @@ for (file in csv_files$file) {
     rows <- c(rows, nrow(d));
 }
 
-site_map <- list("CCS_BESTTrial"="CCS",
+missing_site_map <- function(sitemap, current_leading_dirs){
+    missing_dirs <- setdiff(current_leading_dirs, names(sitemap))
+    return(missing_dirs)
+}
+
+site_map <- list(
+    "CCS_BESTTrial"="CCS",
     "CCS_BESTTrial-arch"="CCS",
+    "BESTTrial"="UNC",
+    "BESTTrial-arch"="UNC",
     "OSUTechSite"="OSUTechSite",
     "OSUTechSite-arch"="OSUTechSite",
     "PittMRC"="Pitt",
@@ -49,6 +57,8 @@ site_map <- list("CCS_BESTTrial"="CCS",
     "TM_UMichAPOLO-arch"="UMich",
     "TM_Vanderbilt"="Vanderbilt",
     "TM_Vanderbilt-arch"="Vanderbilt",
+    "TM_Stanford-arch"="Stanford",
+    "TM_Stanford"="Stanford",    
     "UCSFMRC"="UCSF",
     "UCSFMRC-arch"="UCSF",
     "UMichMRC"="UMich",
@@ -56,7 +66,9 @@ site_map <- list("CCS_BESTTrial"="CCS",
     "UNC"="UNC",
     "UNC-arch"="UNC",
     "UWash_BOLDRegistry"="UWash",
-    "UWash_BOLDRegistry-arch"="UWash")
+    "UWash_BOLDRegistry-arch"="UWash",
+    "Cedars-SinaiP2-arch"="CedarsSinai",
+    "Cedars-SinaiP2"="CedarsSinai");
 
 out <- tibble(file=csv_files$file, domain=domain, row_count=rows, schema=s) %>%
     mutate(leading_dir={        
@@ -76,7 +88,14 @@ out <- tibble(file=csv_files$file, domain=domain, row_count=rows, schema=s) %>%
     }) %>%
     mutate(institution=site_map[real_leading_dir] %>% unlist() %>% unname()) %>%
     select(-real_leading_dir) %>%
-    mutate(minimum_data_set=!is.na(domain));
+    mutate(minimum_data_set=!is.na(domain)) %>%
+    rowwise() %>%
+    mutate(file_hash = {
+        system(sprintf("md5sum \"%s\"",file), intern=T) %>% str_split(" ",simplify=T) %>% `[[`(1);
+    }) %>% ungroup() %>%
+    group_by(archive, file_hash) %>%
+    mutate(duplicate=row_number()!=1) %>%
+    ungroup();
 
 write_csv(out, "derived_data/meta-data.csv");
-
+ 
