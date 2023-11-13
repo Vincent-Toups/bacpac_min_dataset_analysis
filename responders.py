@@ -63,6 +63,8 @@ qs = pl.concat([(pl.read_csv(file, parse_dates=True).select(columns)
                                .alias('QSSTRESN')))
                  for file in meta_data["file"]]);
 
+qs.write_csv("derived_data/qs-collected.csv")
+
 study_counts = qs.groupby('STUDYID').count().with_columns(c('count').alias('Row Count')).drop('count');
 subject_counts = (qs
                   .groupby(['STUDYID','USUBJID'])
@@ -93,6 +95,7 @@ week_counts = (pain_interference
 
 
 
+
 sorted_visit_numbers = [str(vn) for vn in list(pain_interference.groupby('Visit Number').count().sort('Visit Number')['Visit Number'])];
 pain_int_with_nulls = (pain_interference
                        .drop('Visit Date')
@@ -113,20 +116,22 @@ pile = [(df[1]
 pain_interference = ungroup(pile);
 
 pain_interference = pain_interference.join(week_counts,on="USUBJID",how="inner");
+pain_interference.write_csv("derived_data/pain-interference-smoothed.csv");
+
 
 early_pi = (pain_interference
             .filter(c('Visit Number')<=4)
             .groupby('USUBJID')
-            .agg(c('Pain Interference').mean().alias('Pain Interferene Start')))
+            .agg(c('Pain Interference').mean().alias('Pain Interference Start')))
 later_pi = (pain_interference
             .filter(c('Visit Number')>=38)
             .groupby('USUBJID')
-            .agg(c('Pain Interference').mean().alias('Pain Interferene End')));
+            .agg(c('Pain Interference').mean().alias('Pain Interference End')));
 
-thresh = 4;
+thresh = 5;
 change = (early_pi
           .join(later_pi,on="USUBJID",how="inner").join(week_counts,on="USUBJID",how="inner")
-          .with_columns((c('Pain Interferene Start')-c('Pain Interferene End')).alias('Change'))
+          .with_columns((c('Pain Interference Start')-c('Pain Interference End')).alias('Change'))
           .with_columns(pl.when(c('Change')>thresh)
                         .then(pl.lit('Improved'))
                         .when(c('Change')>=-thresh)
@@ -145,10 +150,18 @@ pain_interference = pain_interference.join(change
   geom_histogram())).save("figures/change-distribution.png");
  
 
-((ggplot(pain_interference.filter(c('Visit Count')>=9).to_pandas(), aes('Visit Number','Pain Interference (Smoothed)'))+
- geom_line(aes(group='USUBJID',color='Group'),alpha=0.3))
-.save("figures/ts-pain-interference.png"))
+# ((ggplot(pain_interference.filter(c('Visit Count')>=9).to_pandas(), aes('Visit Number','Pain Interference (Smoothed)'))+
+#   geom_line(aes(group='USUBJID',color='Group'),alpha=0.3)+
+#   geom_line(data=pain_interference
+#             .filter(c('Group')=="Improved")
+#             .filter(c('Visit Count')>=9)
+#             .to_pandas(), mapping=aes('Visit Number','Pain Interference (Smoothed)',group="USUBJID"),color="red",alpha=1,size=1) +
+#   facet_wrap("Group",nrow=3)).save("figures/ts-pain-interference.png"))
 
+((ggplot(pain_interference.filter(c('Visit Count')>=9).to_pandas(), aes('Visit Number','Pain Interference (Smoothed)'))+
+  geom_line(aes(group='USUBJID',color='Group'),alpha=0.3)+
+  facet_wrap("Group",nrow=3)).save("figures/ts-pain-interference.png"))
+ 
 (pain_interference
  .sort('Visit Number')
  .groupby('USUBJID')
@@ -160,3 +173,4 @@ pain_interference = pain_interference.join(change
 pi_initial = pain_interference.groupby('USUBJID')
 
 change.write_csv("derived_data/subject-changes.csv");
+
