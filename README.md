@@ -43,3 +43,28 @@ This collects all the data sets and records their institution, scheme,
 location on the file system, minimum data set domain and other
 information.
 
+Interactive Visualization
+===============================
+
+To run the vizualization from the November Meeting, start the
+container with port 8888 exported and run
+
+```
+make interactive
+```
+
+This should construct all the intermediate data sets and analyses
+required for the visualizatio and start a Jupyter Lab instance on port
+8888.
+
+If you launched the container with something like:
+
+```
+docker run -p 8888:8888 ...
+```
+
+Then you should be able to copy the link printed out by this
+invocation and open it in your browser, which should show the
+visualization notebook.
+
+
