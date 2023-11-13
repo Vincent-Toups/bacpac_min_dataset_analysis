@@ -34,6 +34,7 @@ def order_category_column(pdf, colname, keyfun=lambda x,y: x < y):
                         categories=labels,
                         ordered=True)
     pdf[colname] = cc;
+    
     return pdf;
 
 def count_and_auto_other(df, colname, new_column_name, threshold):
@@ -63,7 +64,8 @@ add_label_order = lambda df: order_category_column(df,
 
 meta_data = (pl.read_csv("derived_data/meta-data.csv")
                             .filter(pl.col("domain")=="DM")
-                            .filter(pl.col("archive")=="false"));
+                            .filter(pl.col("archive")=="false")
+                            .filter(pl.col("duplicate")=="false"));
 
 
 
@@ -187,10 +189,11 @@ projection = (pl
               .from_pandas(projection)
               .join(age_group, on="USUBJID", how="inner")
               .join(for_tags, on="USUBJID", how="inner")
-              .join(studyid_labels,on="STUDYID", how="inner")
-              .with_columns([c('E1')+np.random.normal(0,0.35,projection.shape[0]),
-                             c('E2')+np.random.normal(0,0.35,projection.shape[0])])
-              .to_pandas())
+              .join(demographics.select("USUBJID","SEX","RACE","ETHNIC"), on="USUBJID", how="inner")
+              .join(studyid_labels,on="STUDYID", how="inner"));
+
+projection = projection.with_columns([c('E1')+np.random.normal(0,0.35,projection.shape[0]),c('E2')+np.random.normal(0,0.35,projection.shape[0])]).to_pandas()
+
 projection = order_category_column(projection,
                                    'Gender, Race, Ethnicity (Count)',
                                    keyfun_group_count);
@@ -200,10 +203,33 @@ projection = order_category_column(projection,
 
 
 
+projection = projection.rename(columns={"SEX":"GENDER"});
+projection['RACE, ETHNICITY'] = projection["RACE"] + ', ' + projection['ETHNIC']
 
-              
-p = (ggplot(projection, aes("E1","E2")) + geom_point(aes(fill="Gender, Race, Ethnicity (Count)",size="Age Group"),alpha=0.4,color="black",stroke=0.75))
-p.save("figures/race-ethnicity-projection.png");
+p = (ggplot(projection, aes("E1","E2")) +
+     geom_point(aes(fill="RACE, ETHNICITY", shape="GENDER", size="Age Group", color="RACE, ETHNICITY"), alpha=0.4, stroke=0.75) +
+     guides(fill=guide_legend(override_aes={'alpha': 1})) +
+     labs(title=f"Demographic 2D Project ({len(projection)} Subjects)"))
+
+# Factorize the 'RACE, ETHNICITY' column by count
+ordered_levels = projection['RACE, ETHNICITY'].value_counts().index.tolist()
+
+projection['RACE, ETHNICITY'] = pd.Categorical(projection['RACE, ETHNICITY'], categories=ordered_levels, ordered=True)
+
+p = (ggplot(projection, aes("E1","E2")) +
+     geom_point(aes(fill="RACE, ETHNICITY", shape="GENDER", size="Age Group", color="RACE, ETHNICITY"), alpha=0.4, stroke=0.75) +
+     guides(fill=guide_legend(override_aes={"alpha": 1})) +
+     labs(title=f"Demographic 2D Project ({len(projection)} Subjects)"))
+
+
+
+
+          
+p.save("figures/race-ethnicity-projection.png")
+
+p = (ggplot(projection, aes("E1","E2")) +
+     geom_point(aes(fill="RACE, ETHNICITY",shape="GENDER", size="Age Group"),alpha=0.4,color="black",stroke=0.75))
+p.save("figures/old-race-ethnicity-projection.png");
 
 p = (ggplot(projection, aes("E1","E2")) + geom_point(aes(fill="STUDYID (Count)"),alpha=0.2,color='black',stroke=0.75,size=4))
 p.save("figures/race-ethnicity-projection-studyid.png");
@@ -211,11 +237,32 @@ p.save("figures/race-ethnicity-projection-studyid.png");
 p = (ggplot(projection, aes("E1","E2")) + geom_point(aes(fill="STUDYID (Count)"),alpha=0.2,color='black',stroke=0.75,size=4) + facet_wrap('STUDYID (Count)'))
 p.save("figures/race-ethnicity-projection-studyid-faceted.png");
 
+p = (ggplot(projection, aes("E1","E2")) + geom_point(aes(fill="STUDYID (Count)"),alpha=0.2,color='black',stroke=0.75,size=4) + facet_wrap('STUDYID (Count)'))
+p.save("figures/race-ethnicity-projection-studyid-faceted.png");
+
+from plotnine import ggplot, aes, geom_density_2d, facet_wrap
+
+p = (
+        ggplot(projection, aes(x="E1", y="E2", fill="STUDYID (Count)"))
+        + geom_density_2d(aes(color="STUDYID (Count)"))
+        + facet_wrap("~STUDYID (Count)")
+    )
+p.save("figures/race-ethnicity-projection-density-studyid-faceted.png")
+
+
+
+p = (
+        ggplot(projection, aes(x="E1", y="E2"))
+            + geom_density_2d(aes(fill="..level.."))
+            + facet_wrap("~STUDYID (Count)")
+        )
+p.save("figures/race-ethnicity-projection-studyid-faceted-filled.png")
 
 projection_ex = pl.from_pandas(projection).join(pl.read_csv("derived_data/subject-changes.csv"),
                                 on="USUBJID",
                                 how="inner");
-
+qheader = [f"\"{col}\"" for col in projection_ex.columns];
+projection_ex.to_pandas().to_csv("derived_data/demographics-with-projection.csv");
 
 p = (ggplot(projection_ex
             .filter(c('Visit Count')>=9)

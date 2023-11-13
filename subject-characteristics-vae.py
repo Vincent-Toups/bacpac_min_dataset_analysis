@@ -14,20 +14,54 @@ import util as u
 seed(1000);
 tf_set_seed(1000);
 
+
+
+def strip_months_from_column(df, column_name):
+    # Define a function to transform values with the pattern '<number> Months'
+    def transform_value(value):
+        if isinstance(value, str) and ' Months' in value:
+            return value.replace(' Months', '').strip()
+        return value
+
+    # Apply the transformation to the specified column
+    transformed_column = df[column_name].apply(transform_value).alias(column_name)
+    
+    # Replace the original column with the transformed column
+    return df.with_column(transformed_column)
+
+def coerce_to_string(df, column_name):
+    return df.with_columns(pl.col(column_name).cast(str).alias(column_name))
+
+def replace_values_with_none(df, column_name, values=['NA', '', '.']):
+    return df.with_columns(pl.when(pl.col(column_name).is_in(values)).then(None).otherwise(pl.col(column_name)).alias(column_name))
+
+def cast_to_float(df, column_name):
+    return df.with_columns(pl.col(column_name).cast(pl.Float64).alias(column_name))
+
+
 meta_data = (pl.read_csv("derived_data/meta-data.csv")
                             .filter(pl.col("domain")=="SC")
-                            .filter(pl.col("archive")=="false"));
+                            .filter(pl.col("archive")=="false")
+             .filter(pl.col("duplicate")=="false"));
 
 
 shared_columns = u.calc_shared_columns(meta_data["schema"])
 
-sc = pl.concat([(pl.read_csv(file).select(shared_columns)
-                  .with_columns(pl.col('SCSTRESN').cast(str).alias('SCSTRESN'))
-                  .with_columns(pl.when(c('SCSTRESN')=="NA").then(None).otherwise(c('SCSTRESN'))
-                                  .alias('SCSTRESN'))
-                  .with_columns(pl.when(c('SCSTRESN')==".").then(None).otherwise(c('SCSTRESN'))
-                                  .alias('SCSTRESN'))
-                  .with_columns(c('SCSTRESN').cast(pl.Float64).alias('SCSTRESN'))) for file in meta_data["file"]]);
+sc = pl.concat([pl.read_csv(file)
+                               .select(shared_columns)
+                               .pipe(coerce_to_string, 'SCORRES')
+                               .pipe(coerce_to_string, 'SCSTRESN')
+                               .pipe(replace_values_with_none, 'SCSTRESN')
+                               .pipe(cast_to_float, 'SCSTRESN')
+                               for file in meta_data['file']])
+
+# sc = pl.concat([(pl.read_csv(file).select(shared_columns)a
+#                   .with_columns(pl.col('SCSTRESN').cast(str).alias('SCSTRESN'))
+#                   .with_columns(pl.when(c('SCSTRESN')=="NA").then(None).otherwise(c('SCSTRESN'))
+#                                   .alias('SCSTRESN'))
+#                   .with_columns(pl.when(c('SCSTRESN')==".").then(None).otherwise(c('SCSTRESN'))
+#                                   .alias('SCSTRESN'))
+#                   .with_columns(c('SCSTRESN').cast(pl.Float64).alias('SCSTRESN'))) for file in meta_data["file"]]);
 
 studycounts = sc.groupby('STUDYID').count().with_columns(c('count').alias('Row Count')).drop('count');
 subject_counts = sc.groupby(['STUDYID','USUBJID']).count().drop('count').groupby('STUDYID').count().with_columns(c('count').alias('Subject Count')).drop('count');
@@ -200,6 +234,7 @@ def fix_missing(df, col):
                           .alias(col)));
 
 wide = fix_missing(wide,'HHNUM');
+wide = strip_months_from_column(wide,'PAINDUR');
 wide = fix_missing(wide,'PAINDUR');
 wide = fix_missing(wide,'HEIGHT');
 wide = fix_missing(wide,'WEIGHT');
@@ -246,7 +281,7 @@ def build_vae(n_input=54,
 
 ae.fit(encoded.drop('USUBJID').to_numpy(),
        encoded.drop('USUBJID').to_numpy(),
-       batch_size=100, epochs=200);
+       batch_size=100, epochs=100);
 
 project = (pl.
            from_pandas(pd.
@@ -264,3 +299,18 @@ by_study = (ggplot(project.to_pandas(), aes("E1","E2"))+geom_point(aes(color="ST
 by_study.save("figures/sc_by_study_facet.png");
 
 
+rc = sc.groupby('STUDYID').agg(pl.col('STUDYID').count().alias('Row Count'))
+
+# Create the subj_count DataFrame
+subj_count = (sc.select(['STUDYID', 'USUBJID'])
+                            .unique()
+                            .groupby('STUDYID')
+                            .agg(pl.col('STUDYID').count().alias('Subject Count')))
+
+# Join the rc and subj_count DataFrames on STUDYID
+result = rc.join(subj_count, on="STUDYID", how="inner")
+
+(project
+ .join(wide, on=['USUBJID'])
+ .rename({"E1":"SCAE1","E2":"SCAE2"})
+ .write_csv("derived_data/subject-chars-with-projection.csv"))
